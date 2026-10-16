@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         # The current stable release and the one before it.
-        flutter: ['3.47.7', '3.44.8']
+        flutter: ['3.47.7', '3.44.9']
     steps:
       - uses: actions/checkout@v4
 
@@ -45,3 +45,41 @@ jobs:
 
       - name: Check the package can be published
         run: flutter pub publish --dry-run
+
+  # Catches breaking changes in reaxdb_dart before they are released, and
+  # keeps this CI useful while a new reaxdb_dart version is not on pub.dev.
+  against-reaxdb-main:
+    name: Flutter 3.47.7 / reaxdb_dart main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.7'
+          cache: true
+
+      # Cloned next to this repository, as in local development, so it is
+      # not analyzed as part of this package.
+      - name: Use reaxdb_dart from Reax-BD main
+        run: |
+          git clone --depth 1 https://github.com/dvxlabs520/Reax-BD.git ../Reax-BD
+          printf 'dependency_overrides:\n  reaxdb_dart:\n    path: ../Reax-BD\n' > pubspec_overrides.yaml
+          printf 'dependency_overrides:\n  reaxdb_dart:\n    path: ../../Reax-BD\n' > example/pubspec_overrides.yaml
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      - name: Test the example app
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter analyze --fatal-infos
+          flutter test

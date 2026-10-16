@@ -24,7 +24,8 @@ void main() {
       );
 
       final ReaxDB db = await ReaxFlutter.open('notes');
-      expect(db.path, p.join(root.path, 'reaxdb', 'notes'));
+      // ReaxDB reports canonical paths (lowercased on Windows).
+      expect(db.path, p.canonicalize(p.join(root.path, 'reaxdb', 'notes')));
       await db.put('note:1', {'title': 'Hello'});
       await db.close();
 
