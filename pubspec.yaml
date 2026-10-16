@@ -1,6 +1,6 @@
 name: reaxdb_flutter
 description: "Flutter companion for ReaxDB. Opens databases in the app support directory, keeps the encryption key in the Keychain or Keystore, and turns queries into streams for StreamBuilder."
-version: 0.1.0
+version: 0.2.0
 homepage: https://github.com/dvxlabs520/reaxdb_flutter
 repository: https://github.com/dvxlabs520/reaxdb_flutter
 issue_tracker: https://github.com/dvxlabs520/reaxdb_flutter/issues
@@ -30,7 +30,7 @@ dependencies:
   flutter_secure_storage: ^11.0.0
   path: ^1.9.0
   path_provider: ^2.1.5
-  reaxdb_dart: ^2.1.0
+  reaxdb_dart: ^2.5.0
 
 dev_dependencies:
   flutter_test:

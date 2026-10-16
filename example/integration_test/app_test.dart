@@ -29,8 +29,11 @@ void main() {
     await ReaxFlutter.deleteDatabase(databaseName);
 
     ReaxDB? db;
-    Future<ReaxDB> open() async =>
-        db = await ReaxFlutter.open(databaseName, encrypted: true);
+    Future<ReaxDB> open() async => db = await ReaxFlutter.open(
+      databaseName,
+      encrypted: true,
+      keepInMemory: true,
+    );
 
     await tester.pumpWidget(NotesApp(key: UniqueKey(), openDatabase: open));
     await waitFor(tester, find.text('No notes here yet.'));

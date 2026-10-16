@@ -14,8 +14,9 @@ class NotesApp extends StatelessWidget {
   /// How the app opens its database. Tests replace it.
   final Future<ReaxDB> Function() openDatabase;
 
+  // A notes list fits in memory and is read far more than it is written.
   static Future<ReaxDB> _openEncrypted() =>
-      ReaxFlutter.open(databaseName, encrypted: true);
+      ReaxFlutter.open(databaseName, encrypted: true, keepInMemory: true);
 
   @override
   Widget build(BuildContext context) {

@@ -54,6 +54,12 @@ abstract final class ReaxFlutter {
   /// when Android restores the app's files from a backup but not its
   /// Keystore entries. Call [deleteDatabase] to start over.
   ///
+  /// With [keepInMemory] every value is also kept in memory, like a Hive
+  /// box: reads and queries never touch the disk, and `db.getSync` reads a
+  /// value without a `Future`, for example in a `build` method. Writes are
+  /// still saved to disk first. Opening loads everything, so use it for data
+  /// that fits comfortably in memory.
+  ///
   /// Pass [secureStorage] to change how the key is stored (for example to
   /// use a Keychain access group). Use the same storage options every time,
   /// or the key will not be found.
@@ -70,6 +76,7 @@ abstract final class ReaxFlutter {
     int cacheMaxMemoryBytes = 64 * 1024 * 1024,
     Duration? cacheDefaultTtl,
     int changeStreamBufferSize = 10000,
+    bool keepInMemory = false,
     LogLevel logLevel = LogLevel.warning,
     List<LogOutput>? logOutputs,
     String? loggerName,
@@ -93,6 +100,7 @@ abstract final class ReaxFlutter {
       cacheMaxMemoryBytes: cacheMaxMemoryBytes,
       cacheDefaultTtl: cacheDefaultTtl,
       changeStreamBufferSize: changeStreamBufferSize,
+      keepInMemory: keepInMemory,
       logLevel: logLevel,
       logOutputs: logOutputs,
       loggerName: loggerName,

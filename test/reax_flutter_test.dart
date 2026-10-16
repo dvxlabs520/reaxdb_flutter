@@ -195,6 +195,25 @@ void main() {
     });
   });
 
+  test('keepInMemory reaches ReaxDB.open', () async {
+    final ReaxDB db = await ReaxFlutter.open(
+      'memory',
+      encrypted: true,
+      keepInMemory: true,
+    );
+    expect(db.keepsInMemory, isTrue);
+    await db.put('settings:theme', 'dark');
+    expect(db.getSync<String>('settings:theme'), 'dark');
+    await db.close();
+
+    final ReaxDB reopened = await ReaxFlutter.open(
+      'memory',
+      encrypted: true,
+      keepInMemory: true,
+    );
+    expect(reopened.getSync<String>('settings:theme'), 'dark');
+  });
+
   test('passes options through to ReaxDB.open', () async {
     await (await ReaxFlutter.open('versioned')).close();
     final ReaxDB db = await ReaxFlutter.open(

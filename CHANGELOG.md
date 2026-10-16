@@ -1,3 +1,11 @@
+## 0.2.0
+
+- `ReaxFlutter.open(name, keepInMemory: true)` keeps every value in memory,
+  like a Hive box. Reads and queries skip the disk, and `db.getSync` reads a
+  value without a `Future`. Writes are saved to disk first, as before.
+- Needs `reaxdb_dart` 2.5.0, which also brings writes that no longer stall
+  on maintenance and `rekey` / `changePassphrase`.
+
 ## 0.1.0
 
 First release.

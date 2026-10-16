@@ -123,6 +123,22 @@ On macOS, secure storage needs the Keychain Sharing capability. See the
 [flutter_secure_storage setup notes](https://pub.dev/packages/flutter_secure_storage).
 On Linux it needs `libsecret`.
 
+## Keep everything in memory
+
+For data that fits in memory and is read far more than it is written,
+keep every value in memory, like a Hive box:
+
+```dart
+final db = await ReaxFlutter.open('settings', keepInMemory: true);
+
+// In a build method, no FutureBuilder needed:
+final theme = db.getSync<String>('theme') ?? 'light';
+```
+
+Reads and queries then never touch the disk. Writes are still saved to disk
+first, so nothing is lost if the app is killed. Opening takes longer,
+because it loads everything.
+
 ## Watch a query
 
 ```dart
