@@ -32,10 +32,10 @@ abstract final class ReaxFlutter {
     mOptions: MacOsOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
-  // One key load or creation at a time per secure storage entry, so two
-  // concurrent first opens can never generate and save two different keys.
-  static final Map<String, Future<Uint8List>> _pendingKeys =
-      <String, Future<Uint8List>>{};
+  // One encrypted open, key rotation or delete at a time per database, so
+  // two concurrent first opens can never generate and save two different
+  // keys, and an open never reads the key in the middle of a rotation.
+  static final Map<String, Future<void>> _locks = <String, Future<void>>{};
 
   static final RegExp _validName = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$');
 
@@ -59,6 +59,11 @@ abstract final class ReaxFlutter {
   /// value without a `Future`, for example in a `build` method. Writes are
   /// still saved to disk first. Opening loads everything, so use it for data
   /// that fits comfortably in memory.
+  ///
+  /// If a [rotateKey] was interrupted (the app was killed, or saving the
+  /// key failed), the new key is still in secure storage under a second
+  /// entry. When the database does not open with the main key, this tries
+  /// that one, and if it works, makes it the main key.
   ///
   /// Pass [secureStorage] to change how the key is stored (for example to
   /// use a Keychain access group). Use the same storage options every time,
@@ -86,12 +91,7 @@ abstract final class ReaxFlutter {
     FutureOr<void> Function(int from, int to, ReaxDB db)? onUpgrade,
   }) async {
     final String path = await pathFor(name);
-    EncryptionConfig encryption = const EncryptionConfig.none();
-    if (encrypted) {
-      final Uint8List key = await _loadOrCreateKey(name, path, secureStorage);
-      encryption = EncryptionConfig.aes256(key: key);
-    }
-    return ReaxDB.open(
+    Future<ReaxDB> openWith(EncryptionConfig encryption) => ReaxDB.open(
       path: path,
       encryption: encryption,
       syncMode: syncMode,
@@ -109,6 +109,88 @@ abstract final class ReaxFlutter {
       schemaVersion: schemaVersion,
       onUpgrade: onUpgrade,
     );
+
+    if (!encrypted) return openWith(const EncryptionConfig.none());
+    return _locked(
+      name,
+      () => _openEncrypted(name, path, secureStorage, openWith),
+    );
+  }
+
+  /// Replaces the encryption key of the database [name] with a new random
+  /// key, and returns the database opened with it.
+  ///
+  /// [db] must be that database, open and encrypted, as returned by
+  /// `open(name, encrypted: true)` with the same [secureStorage]. It is
+  /// closed: use the returned instance from then on.
+  ///
+  /// Every value is encrypted again with the new key (see [ReaxDB.rekey]),
+  /// which needs free space for about two copies of the data. The app
+  /// never loses access to its data, even if it is killed halfway:
+  ///
+  /// 1. The new key is saved in a second secure storage entry,
+  ///    `reaxdb.<name>.key.next`, and read back.
+  /// 2. The database is encrypted again with the new key. A crash leaves it
+  ///    readable with the old key or the new one, never a mix.
+  /// 3. The new key replaces the old one in the main entry, and the second
+  ///    entry is deleted.
+  ///
+  /// After a crash at any step, [open] finds the key that works.
+  ///
+  /// Throws an [ArgumentError], without touching [db], if [db] is closed,
+  /// is not the database [name], or is not encrypted with AES-256. If
+  /// anything else fails, [db] is closed and the database keeps a key that
+  /// [open] finds: open it again.
+  static Future<ReaxDB> rotateKey(
+    String name,
+    ReaxDB db, {
+    FlutterSecureStorage secureStorage = defaultSecureStorage,
+  }) async {
+    final String path = await pathFor(name);
+    if (db.isClosed) {
+      throw ArgumentError.value(db, 'db', 'The database is closed');
+    }
+    if (db.path != p.canonicalize(path)) {
+      throw ArgumentError.value(
+        db,
+        'db',
+        'This is the database at ${db.path}, not "$name" at $path',
+      );
+    }
+    if (db.encryptionInfo['type'] != EncryptionType.aes256.name) {
+      throw ArgumentError.value(
+        db,
+        'db',
+        'The database is not encrypted with AES-256. Open it with '
+            'ReaxFlutter.open("$name", encrypted: true)',
+      );
+    }
+
+    final String entry = keyNameFor(name);
+    final String nextEntry = _nextKeyNameFor(name);
+    return _locked(name, () async {
+      ReaxDB current = db;
+      try {
+        if (await secureStorage.read(key: entry) == null) {
+          throw EncryptionException(
+            'The encryption key "$entry" of "$name" is not in this secure '
+            'storage. Pass the secureStorage the database was opened with.',
+          );
+        }
+        final Uint8List key = _generateKey();
+        final String encoded = base64Encode(key);
+        await _writeVerified(secureStorage, nextEntry, encoded, name);
+        current = await db.rekey(EncryptionConfig.aes256(key: key));
+        await _writeVerified(secureStorage, entry, encoded, name);
+        // The main entry already holds the new key, so a leftover second
+        // entry is harmless: the next open deletes it.
+        await _deleteQuietly(secureStorage, nextEntry);
+        return current;
+      } catch (_) {
+        if (!current.isClosed) await current.close();
+        rethrow;
+      }
+    });
   }
 
   /// The absolute path of the database called [name].
@@ -128,7 +210,11 @@ abstract final class ReaxFlutter {
     return 'reaxdb.$name.key';
   }
 
-  /// Deletes the files of the database called [name] and its encryption key.
+  // Holds the new key while a rotateKey is in progress.
+  static String _nextKeyNameFor(String name) => '${keyNameFor(name)}.next';
+
+  /// Deletes the files of the database called [name] and its encryption
+  /// key, including the new key of an interrupted [rotateKey].
   ///
   /// Close the database first: deleting the files of an open database
   /// leaves that instance writing to files that no longer exist. Does
@@ -138,10 +224,13 @@ abstract final class ReaxFlutter {
     FlutterSecureStorage secureStorage = defaultSecureStorage,
   }) async {
     final Directory directory = Directory(await pathFor(name));
-    if (await directory.exists()) {
-      await directory.delete(recursive: true);
-    }
-    await secureStorage.delete(key: keyNameFor(name));
+    await _locked(name, () async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+      await secureStorage.delete(key: keyNameFor(name));
+      await secureStorage.delete(key: _nextKeyNameFor(name));
+    });
   }
 
   static void _checkName(String name) {
@@ -155,33 +244,104 @@ abstract final class ReaxFlutter {
     }
   }
 
-  static Future<Uint8List> _loadOrCreateKey(
+  static Future<T> _locked<T>(String name, Future<T> Function() action) {
+    final Future<void> previous = _locks[name] ?? Future<void>.value();
+    final Completer<void> done = Completer<void>();
+    _locks[name] = done.future;
+    return previous.then((_) => action()).whenComplete(() {
+      done.complete();
+      if (identical(_locks[name], done.future)) _locks.remove(name);
+    });
+  }
+
+  static Future<ReaxDB> _openEncrypted(
     String name,
     String path,
     FlutterSecureStorage storage,
-  ) {
+    Future<ReaxDB> Function(EncryptionConfig encryption) openWith,
+  ) async {
     final String entry = keyNameFor(name);
-    final Future<Uint8List>? pending = _pendingKeys[entry];
-    if (pending != null) return pending;
-    final Future<Uint8List> load =
-        _loadOrCreateKeyNow(name, entry, path, storage).whenComplete(() {
-          // A block body: returning the removed future would make whenComplete
-          // wait for itself.
-          _pendingKeys.remove(entry);
-        });
-    _pendingKeys[entry] = load;
-    return load;
+    final String nextEntry = _nextKeyNameFor(name);
+    final String? stored = await storage.read(key: entry);
+    final String? next = await storage.read(key: nextEntry);
+
+    if (stored == null) {
+      if (next != null) {
+        // Not left by rotateKey, which never removes the main key, but the
+        // second entry is still the only key there is.
+        final ReaxDB db = await openWith(
+          EncryptionConfig.aes256(key: _decodeKey(name, next)),
+        );
+        await _promote(storage, entry, nextEntry, next, name);
+        return db;
+      }
+      return openWith(
+        EncryptionConfig.aes256(
+          key: await _createKey(name, entry, path, storage),
+        ),
+      );
+    }
+
+    final ReaxDB db;
+    try {
+      db = await openWith(
+        EncryptionConfig.aes256(key: _decodeKey(name, stored)),
+      );
+    } on EncryptionException catch (error, stack) {
+      if (next == null) rethrow;
+      // A rotateKey was interrupted after the database was encrypted again
+      // with the new key, but before that key replaced the old one.
+      final ReaxDB rotated;
+      try {
+        rotated = await openWith(
+          EncryptionConfig.aes256(key: _decodeKey(name, next)),
+        );
+      } on ReaxDbException {
+        Error.throwWithStackTrace(error, stack);
+      }
+      await _promote(storage, entry, nextEntry, next, name);
+      return rotated;
+    }
+    // The main key opened the database, so a rotation never got as far as
+    // encrypting it again, or it finished: the second entry is not needed.
+    if (next != null) await _deleteQuietly(storage, nextEntry);
+    return db;
   }
 
-  static Future<Uint8List> _loadOrCreateKeyNow(
+  /// Makes the key in [nextEntry] the main key. The database is already open
+  /// with it, so a failure here only means the next open does this again.
+  static Future<void> _promote(
+    FlutterSecureStorage storage,
+    String entry,
+    String nextEntry,
+    String encoded,
+    String name,
+  ) async {
+    try {
+      await _writeVerified(storage, entry, encoded, name);
+    } on Exception {
+      return;
+    }
+    await _deleteQuietly(storage, nextEntry);
+  }
+
+  static Future<void> _deleteQuietly(
+    FlutterSecureStorage storage,
+    String entry,
+  ) async {
+    try {
+      await storage.delete(key: entry);
+    } on Exception {
+      // A stale entry is harmless; the next open deletes it.
+    }
+  }
+
+  static Future<Uint8List> _createKey(
     String name,
     String entry,
     String path,
     FlutterSecureStorage storage,
   ) async {
-    final String? stored = await storage.read(key: entry);
-    if (stored != null) return _decodeKey(name, stored);
-
     if (await _hasFiles(path)) {
       throw EncryptionException(
         'The database "$name" already has files at $path, but its '
@@ -192,20 +352,31 @@ abstract final class ReaxFlutter {
         'way, or call ReaxFlutter.deleteDatabase("$name") to start over.',
       );
     }
+    final Uint8List key = _generateKey();
+    // Never create the database with a key the platform did not keep.
+    await _writeVerified(storage, entry, base64Encode(key), name);
+    return key;
+  }
 
+  static Uint8List _generateKey() {
     final Random random = Random.secure();
-    final Uint8List key = Uint8List.fromList(
+    return Uint8List.fromList(
       List<int>.generate(keyLength, (_) => random.nextInt(256)),
     );
-    final String encoded = base64Encode(key);
+  }
+
+  static Future<void> _writeVerified(
+    FlutterSecureStorage storage,
+    String entry,
+    String encoded,
+    String name,
+  ) async {
     await storage.write(key: entry, value: encoded);
-    // Never create the database with a key the platform did not keep.
     if (await storage.read(key: entry) != encoded) {
       throw EncryptionException(
         'Could not save the encryption key of "$name" in secure storage.',
       );
     }
-    return key;
   }
 
   static Uint8List _decodeKey(String name, String stored) {

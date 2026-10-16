@@ -4,6 +4,8 @@
 ///   so apps never pass a relative path (which fails on iOS and Android).
 /// - With `encrypted: true` the AES-256 key is generated on first launch and
 ///   kept in the Keychain (iOS, macOS) or the Keystore (Android).
+///   [ReaxFlutter.rotateKey] replaces it, safely even if the app is killed
+///   halfway.
 /// - [ReaxWatchQuery.watchQuery] turns a query into a stream that runs again
 ///   whenever its collection changes, ready for a `StreamBuilder`.
 ///

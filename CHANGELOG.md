@@ -1,3 +1,19 @@
+## 0.3.0
+
+- `ReaxFlutter.rotateKey(name, db)` replaces the AES-256 key of an
+  encrypted database with a new random one and returns the database opened
+  with it. The new key is saved under a second entry,
+  `reaxdb.<name>.key.next`, before the data is encrypted again, and only
+  replaces the old key afterwards, so a crash or a secure storage error at
+  any step never locks the app out of its data.
+- `ReaxFlutter.open(name, encrypted: true)` finishes an interrupted
+  rotation: when the main key does not open the database and the second
+  entry does, it makes that key the main one. A leftover second entry that
+  is not needed is deleted.
+- `ReaxFlutter.deleteDatabase` also removes the second entry.
+- Encrypted opens, rotations and deletes of the same database now run one
+  at a time.
+
 ## 0.2.0
 
 - `ReaxFlutter.open(name, keepInMemory: true)` keeps every value in memory,

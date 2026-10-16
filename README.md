@@ -12,7 +12,8 @@ This package does three things:
   Android).
 - **Keeps the encryption key safe.** With `encrypted: true`, a random
   256-bit key is created on the first launch and saved in the Keychain
-  (iOS, macOS) or the Keystore (Android). Later launches read it back.
+  (iOS, macOS) or the Keystore (Android). Later launches read it back, and
+  `ReaxFlutter.rotateKey` replaces it without ever locking the app out.
 - **Turns a query into a stream.** `db.watchQuery(query)` runs the query
   again when its collection changes, so a `StreamBuilder` always shows
   current data.
@@ -95,7 +96,49 @@ turn Auto Backup off. To start over, call:
 await ReaxFlutter.deleteDatabase('notes');
 ```
 
-This deletes the files and the key. Close the database first.
+This deletes the files and the key (both entries, if a rotation was
+interrupted). Close the database first.
+
+### Rotate the key
+
+To replace the key with a new random one, pass the open database to
+`ReaxFlutter.rotateKey` and keep using the database it returns:
+
+```dart
+db = await ReaxFlutter.rotateKey('notes', db);
+```
+
+The old instance is closed. Every value is encrypted again with the new
+key, so this takes about as long as copying the database, and needs free
+space for about two copies of it. Run it when the app is idle, not on every
+launch.
+
+The app never loses access to its data, even if it is killed halfway:
+
+1. The new key is saved under a second entry, `reaxdb.notes.key.next`,
+   and read back.
+2. The database is encrypted again with the new key. A crash leaves it
+   readable with the old key or the new one, never a mix.
+3. The new key replaces the old one under `reaxdb.notes.key`, and the
+   second entry is deleted.
+
+If the database does not open with the main key and a second entry
+exists, `ReaxFlutter.open` tries that one and, if it works, makes it the
+main key. So after a crash at any step, the next `open` just works.
+
+If `rotateKey` throws, the database is closed and still has a key that
+`open` finds. Open it again:
+
+```dart
+try {
+  db = await ReaxFlutter.rotateKey('notes', db);
+} on Exception {
+  db = await ReaxFlutter.open('notes', encrypted: true);
+}
+```
+
+`rotateKey` only works on a database opened with `encrypted: true`. Pass
+the same `secureStorage` you open it with.
 
 ### Storage options
 
