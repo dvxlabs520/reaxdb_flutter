@@ -13,6 +13,8 @@
 - `ReaxFlutter.deleteDatabase` also removes the second entry.
 - Encrypted opens, rotations and deletes of the same database now run one
   at a time.
+- The example app imports `package:material_ui`, which replaces
+  `package:flutter/material.dart` from Flutter 3.50.
 
 ## 0.2.0
 

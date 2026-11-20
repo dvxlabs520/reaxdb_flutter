@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:reaxdb_flutter/reaxdb_flutter.dart';
 
 /// Name of the example database, stored in the app support directory.

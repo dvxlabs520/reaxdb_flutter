@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:reaxdb_flutter/reaxdb_flutter.dart';
 import 'package:reaxdb_flutter/src/watch_query.dart' show watchResults;
@@ -16,8 +16,9 @@ class TitleList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: StreamBuilder<List<Map<String, dynamic>>>(
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: StreamBuilder<List<Map<String, dynamic>>>(
         stream: stream,
         builder: (context, snapshot) {
           if (snapshot.hasError) return Text('error: ${snapshot.error}');
