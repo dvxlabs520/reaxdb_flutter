@@ -18,6 +18,15 @@ This package does three things:
   again when its collection changes, so a `StreamBuilder` always shows
   current data.
 
+Coming from Hive or SharedPreferences? Add
+[`reaxdb_migrate`](https://pub.dev/packages/reaxdb_migrate) and copy your
+data over in one call:
+
+```dart
+final db = await ReaxFlutter.open('app');
+await ReaxMigrate.fromHive(['users', 'settings'], into: db);
+```
+
 ## Install
 
 ```bash
